@@ -5,15 +5,10 @@ import {
   TIER_1_NUDGES,
   TIER_2_FRAMEWORKS,
 } from "@/lib/interview/ai-prompts"
+import { getOpenAIKey } from "@/lib/interview/openai-key"
 
 export const maxDuration = 30
 export const runtime = "nodejs"
-
-let _openai: OpenAI | null = null
-function getOpenAI(): OpenAI {
-  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  return _openai
-}
 
 interface HintBody {
   session_id?: string
@@ -53,7 +48,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ hint: framework, tier: 2 })
     }
 
-    if (!process.env.OPENAI_API_KEY) {
+    const apiKey = await getOpenAIKey()
+    if (!apiKey) {
       return NextResponse.json(
         { error: "Server is missing OPENAI_API_KEY for tier-3 hints." },
         { status: 500 },
@@ -68,7 +64,7 @@ export async function POST(request: NextRequest) {
     )
     const safeTarget = (first_principle_target || "").slice(0, 500)
 
-    const completion = await getOpenAI().chat.completions.create({
+    const completion = await new OpenAI({ apiKey }).chat.completions.create({
       model: "gpt-4o",
       messages: [
         { role: "system", content: HINT_TIER_3_PROMPT },

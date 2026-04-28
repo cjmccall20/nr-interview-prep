@@ -10,15 +10,10 @@ import {
   compressWhiteboardImage,
   isBlankImage,
 } from "@/lib/interview/image-compress"
+import { getOpenAIKey } from "@/lib/interview/openai-key"
 
 export const maxDuration = 60
 export const runtime = "nodejs"
-
-let _openai: OpenAI | null = null
-function getOpenAI(): OpenAI {
-  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  return _openai
-}
 
 interface ProblemPart {
   label: string
@@ -53,7 +48,8 @@ interface EvaluateBody {
  */
 export async function POST(request: NextRequest) {
   try {
-    if (!process.env.OPENAI_API_KEY) {
+    const apiKey = await getOpenAIKey()
+    if (!apiKey) {
       return jsonError(
         500,
         "Server is missing OPENAI_API_KEY. Set it in your deployment env.",
@@ -179,7 +175,7 @@ Focus evaluation on the CURRENT part only. If the candidate is clearly correct o
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const completion = await getOpenAI().chat.completions.create({
+          const completion = await new OpenAI({ apiKey }).chat.completions.create({
             model: "gpt-4o",
             messages,
             stream: true,
