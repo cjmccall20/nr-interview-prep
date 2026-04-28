@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getCloudflareContext } from "@opennextjs/cloudflare"
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
@@ -14,25 +13,24 @@ function timingSafeEqual(a: string, b: string): boolean {
   return mismatch === 0
 }
 
-async function readEnv(name: string): Promise<string | undefined> {
-  try {
-    const cf = await getCloudflareContext({ async: true })
-    const fromCf = (cf?.env as Record<string, string | undefined> | undefined)?.[name]
-    if (fromCf) return fromCf
-  } catch {
-    // Outside Worker runtime (e.g. local dev) — fall through to process.env
+function readEnv(name: string): string | undefined {
+  if (typeof process !== "undefined" && process.env?.[name]) {
+    return process.env[name]
   }
-  return process.env[name]
+  // Workers expose bindings on globalThis when bundled by OpenNext
+  const g = globalThis as unknown as Record<string, string | undefined>
+  return g[name]
 }
 
-export async function middleware(request: NextRequest) {
-  const expectedUser = await readEnv("BASIC_AUTH_USER")
-  const expectedPass = await readEnv("BASIC_AUTH_PASS")
+export function middleware(request: NextRequest) {
+  const expectedUser = readEnv("BASIC_AUTH_USER")
+  const expectedPass = readEnv("BASIC_AUTH_PASS")
 
   if (!expectedUser || !expectedPass) {
-    return new NextResponse("Server misconfigured: basic auth credentials not set", {
-      status: 500,
-    })
+    return new NextResponse(
+      `Server misconfigured: basic auth credentials not set (user=${!!expectedUser}, pass=${!!expectedPass})`,
+      { status: 500 },
+    )
   }
 
   const header = request.headers.get("authorization")

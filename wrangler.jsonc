@@ -8,6 +8,10 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  "vars": {
+    "BASIC_AUTH_USER": "nupocapplicant",
+    "BASIC_AUTH_PASS": "gonavynupoc"
+  },
   "observability": {
     "enabled": true
   }
