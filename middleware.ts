@@ -14,20 +14,20 @@ function timingSafeEqual(a: string, b: string): boolean {
   return mismatch === 0
 }
 
-function readEnv(name: string): string | undefined {
+async function readEnv(name: string): Promise<string | undefined> {
   try {
-    const cf = getCloudflareContext()
+    const cf = await getCloudflareContext({ async: true })
     const fromCf = (cf?.env as Record<string, string | undefined> | undefined)?.[name]
     if (fromCf) return fromCf
   } catch {
-    // getCloudflareContext throws outside Worker runtime (e.g. local dev) — fall through
+    // Outside Worker runtime (e.g. local dev) — fall through to process.env
   }
   return process.env[name]
 }
 
-export function middleware(request: NextRequest) {
-  const expectedUser = readEnv("BASIC_AUTH_USER")
-  const expectedPass = readEnv("BASIC_AUTH_PASS")
+export async function middleware(request: NextRequest) {
+  const expectedUser = await readEnv("BASIC_AUTH_USER")
+  const expectedPass = await readEnv("BASIC_AUTH_PASS")
 
   if (!expectedUser || !expectedPass) {
     return new NextResponse("Server misconfigured: basic auth credentials not set", {
