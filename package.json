@@ -9,7 +9,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.4",
@@ -21,9 +24,10 @@
     "@radix-ui/react-tabs": "^1.1.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "eslint-config-next": "^15.5.15",
     "katex": "^0.16.11",
     "lucide-react": "^0.469.0",
-    "next": "15.1.3",
+    "next": "^15.5.15",
     "openai": "^4.77.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -31,10 +35,10 @@
     "react-resizable-panels": "^2.1.7",
     "rehype-katex": "^7.0.1",
     "remark-math": "^6.0.0",
-    "sharp": "^0.33.5",
     "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.19.4",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/katex": "^0.16.7",
     "@types/node": "^22.10.2",
@@ -43,6 +47,7 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^4.0.0",
     "tw-animate-css": "^1.0.1",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "wrangler": "^4.86.0"
   }
 }

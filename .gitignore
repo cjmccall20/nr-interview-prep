@@ -34,3 +34,9 @@ Thumbs.db
 *.pem
 *.tsbuildinfo
 .vercel
+
+# Cloudflare / OpenNext
+.open-next/
+.wrangler/
+.dev.vars
+cloudflare-env.d.ts
