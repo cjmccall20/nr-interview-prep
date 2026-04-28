@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getCloudflareContext } from "@opennextjs/cloudflare"
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
@@ -13,9 +14,20 @@ function timingSafeEqual(a: string, b: string): boolean {
   return mismatch === 0
 }
 
+function readEnv(name: string): string | undefined {
+  try {
+    const cf = getCloudflareContext()
+    const fromCf = (cf?.env as Record<string, string | undefined> | undefined)?.[name]
+    if (fromCf) return fromCf
+  } catch {
+    // getCloudflareContext throws outside Worker runtime (e.g. local dev) — fall through
+  }
+  return process.env[name]
+}
+
 export function middleware(request: NextRequest) {
-  const expectedUser = process.env.BASIC_AUTH_USER
-  const expectedPass = process.env.BASIC_AUTH_PASS
+  const expectedUser = readEnv("BASIC_AUTH_USER")
+  const expectedPass = readEnv("BASIC_AUTH_PASS")
 
   if (!expectedUser || !expectedPass) {
     return new NextResponse("Server misconfigured: basic auth credentials not set", {
