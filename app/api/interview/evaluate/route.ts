@@ -175,7 +175,7 @@ Focus evaluation on the CURRENT part only. If the candidate is clearly correct o
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const completion = await new OpenAI({ apiKey }).chat.completions.create({
+          const completion = await new OpenAI({ apiKey, fetch: globalThis.fetch.bind(globalThis) }).chat.completions.create({
             model: "gpt-4o",
             messages,
             stream: true,
@@ -210,7 +210,11 @@ Focus evaluation on the CURRENT part only. If the candidate is clearly correct o
           )
           controller.close()
         } catch (err) {
-          console.error("OpenAI evaluation error:", err)
+          const detail =
+            err instanceof Error
+              ? `${err.name}: ${err.message}${err.cause ? ` | cause: ${String(err.cause)}` : ""}${err.stack ? `\n${err.stack}` : ""}`
+              : String(err)
+          console.error("OpenAI evaluation error:", detail)
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({

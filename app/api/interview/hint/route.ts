@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     )
     const safeTarget = (first_principle_target || "").slice(0, 500)
 
-    const completion = await new OpenAI({ apiKey }).chat.completions.create({
+    const completion = await new OpenAI({ apiKey, fetch: globalThis.fetch.bind(globalThis) }).chat.completions.create({
       model: "gpt-4o",
       messages: [
         { role: "system", content: HINT_TIER_3_PROMPT },
