@@ -289,7 +289,6 @@ export default function SessionWorkspace({
         total_hints: hintTier,
         flawless_execution: hintTier === 0,
       })
-      onSessionComplete()
     }
   }
 
