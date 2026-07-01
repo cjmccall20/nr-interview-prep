@@ -11,7 +11,7 @@ in an OpenAI API key, and run it.
 - Next.js 15 (App Router) + React 19 + Tailwind 4
 - OpenAI `gpt-4o` for evaluation (with vision) and Tier-3 hints
 - Client-only session persistence via `localStorage`
-- ~140 vetted problems across Calculus, Physics, and major-specific topics
+- ~215 vetted problems across Calculus, Physics, and major-specific topics
 - Optional "Teach Me" equation sheet + study guide for every NUPOC topic
 
 ## Quick Start

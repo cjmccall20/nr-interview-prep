@@ -17,9 +17,11 @@ import Whiteboard from "./whiteboard"
 import PhaseTimer from "./phase-timer"
 import ChatLog, { type ChatMessage } from "./chat-log"
 import FunFact from "./fun-fact"
+import MicRecorder from "./mic-recorder"
 import { MarkdownWithMath } from "./markdown-with-math"
 import { streamEvaluation, requestHint } from "@/lib/interview/stream"
 import { deleteSession, updateSession } from "@/lib/interview/session-store"
+import { recordOutcome } from "@/lib/interview/progress-store"
 import type { PartSummary, Problem, SessionPhase } from "@/lib/interview/types"
 
 interface SessionWorkspaceProps {
@@ -75,6 +77,19 @@ function openingMessageFor(phase: SessionPhase, problem: Problem): string | null
 }
 
 const PART_COMPLETE_RE = /\[PART_COMPLETE:\s*summary\s*=\s*"([^"]*)"\s*\]/
+const WEAKNESS_RE = /\[WEAKNESS:\s*concept\s*=\s*"([^"]*)"\s*\]/gi
+const CHALLENGE_RE = /\[CHALLENGE\]/gi
+
+// Strip internal control markers so the candidate never sees them in the chat.
+function stripMarkers(text: string): string {
+  return text
+    .replace(WEAKNESS_RE, "")
+    .replace(CHALLENGE_RE, "")
+    .replace(/\[PHASE_COMPLETE\]/g, "")
+    .replace(PART_COMPLETE_RE, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}
 
 function useIsMobile(breakpoint = MOBILE_BREAKPOINT_PX): boolean {
   const [isMobile, setIsMobile] = useState(false)
@@ -121,6 +136,11 @@ export default function SessionWorkspace({
   )
   const [partSummaries, setPartSummaries] = useState<PartSummary[]>(initialPartSummaries ?? [])
   const [whiteboardClearSignal, setWhiteboardClearSignal] = useState(0)
+  const [hasAttempted, setHasAttempted] = useState(startingPhase === "complete")
+  const [showSolution, setShowSolution] = useState(false)
+  const challengesTotal = problem.assumption_challenges?.length ?? 0
+  const [challengesUsed, setChallengesUsed] = useState(0)
+  const conceptsRef = useRef<string[]>([])
   const [mobileView, setMobileView] = useState<"chat" | "whiteboard">(
     startingPhase === "derivation" ? "whiteboard" : "chat",
   )
@@ -181,6 +201,7 @@ export default function SessionWorkspace({
     setIsSubmitting(true)
     setIsProcessing(true)
     setTimerRunning(false)
+    setHasAttempted(true)
 
     const userText = text || "[Whiteboard submitted for review]"
     if (!overrideText) setTextInput("")
@@ -196,9 +217,14 @@ export default function SessionWorkspace({
         prompt_text: problem.prompt_text,
         first_principle_target: problem.first_principle_target,
         solution_outline: problem.solution_outline || undefined,
+        solution_walkthrough: problem.solution_walkthrough || undefined,
         parts_json: problem.parts_json || undefined,
         current_part_index: isCapstone ? currentPartIndex ?? 0 : undefined,
         part_summaries: isCapstone ? partSummaries : undefined,
+        assumption_challenges:
+          challengesTotal > 0 ? problem.assumption_challenges : undefined,
+        challenges_remaining:
+          challengesTotal > 0 ? challengesTotal - challengesUsed : undefined,
       },
     }
 
@@ -213,10 +239,19 @@ export default function SessionWorkspace({
         },
         onComplete: (fullResponse, phaseComplete) => {
           setStreamingContent("")
-          addMessage("tutor", fullResponse)
+          addMessage("tutor", stripMarkers(fullResponse))
           setIsProcessing(false)
           setIsSubmitting(false)
           if (isMobile && mobileView === "whiteboard") setTutorBadge(true)
+
+          // Track posed assumption challenges (marker emitted by the grader).
+          if (fullResponse.includes("[CHALLENGE]")) {
+            setChallengesUsed((n) => n + 1)
+          }
+          // Collect AI-tagged weaknesses for long-term tracking.
+          for (const m of fullResponse.matchAll(WEAKNESS_RE)) {
+            if (m[1]?.trim()) conceptsRef.current.push(m[1].trim())
+          }
 
           const partMatch = fullResponse.match(PART_COMPLETE_RE)
           if (isCapstone && partMatch && currentPartIndex !== null && problem.parts_json) {
@@ -283,12 +318,24 @@ export default function SessionWorkspace({
       setPhase("complete")
       setTimerRunning(false)
       if (isMobile) setMobileView("chat")
+      const flawless = hintTier === 0
       saveSessionUpdate(sessionId, {
         phase: "complete",
         completed_at: new Date().toISOString(),
         total_hints: hintTier,
-        flawless_execution: hintTier === 0,
+        flawless_execution: flawless,
       })
+      // Long-term, per-topic weakness tracking (survives "Clear all progress").
+      try {
+        recordOutcome({
+          topic: problem.topic,
+          hints: hintTier,
+          flawless,
+          concepts: conceptsRef.current,
+        })
+      } catch (e) {
+        console.error("Failed to record outcome:", e)
+      }
     }
   }
 
@@ -378,6 +425,47 @@ export default function SessionWorkspace({
     isCapstone && currentPartIndex !== null && problem.parts_json
       ? problem.parts_json[currentPartIndex] ?? null
       : null
+
+  // Worked-solution reveal, gated on the candidate having an attempt on record.
+  const renderSolutionSection = () => {
+    if (!problem.solution_walkthrough) return null
+    const unlocked = hasAttempted || phase === "complete"
+    if (!unlocked) {
+      return (
+        <div className="mt-3 rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2.5">
+          <div className="text-xs text-slate-400 leading-relaxed">
+            <span className="text-slate-300 font-medium">
+              Give it an honest attempt first
+            </span>{" "}
+            — the full worked solution unlocks after you submit. Even if you&apos;re
+            unsure how to solve it, working through your reasoning is the real skill:
+            on the actual interview you may get a problem you can&apos;t immediately
+            crack, and they&apos;re watching how you reason through it.
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div className="mt-3">
+        <button
+          onClick={() => setShowSolution((v) => !v)}
+          className="text-xs px-3 py-1.5 rounded border border-blue-500/40 text-blue-300 hover:bg-blue-500/10 transition-colors"
+        >
+          {showSolution ? "Hide worked solution" : "View worked solution"}
+        </button>
+        {showSolution && (
+          <div className="mt-2 rounded-lg border border-[#334155] bg-[#0f172a] px-4 py-3 max-h-[50vh] overflow-y-auto">
+            <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">
+              How to approach this problem
+            </div>
+            <div className="text-slate-200 text-sm leading-relaxed">
+              <MarkdownWithMath>{problem.solution_walkthrough}</MarkdownWithMath>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   // ---- Shared chat-pane content renderer -------------------------------
   // Used by both the desktop resizable panel and the mobile tab view.
@@ -538,14 +626,20 @@ export default function SessionWorkspace({
             className="w-full h-20 px-3 py-2 bg-[#0f172a] border border-[#334155] rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             disabled={isSubmitting}
           />
-          <div className="flex items-center justify-between mt-2 gap-2">
-            <span className="text-[11px] text-slate-600 hidden sm:inline">
+          <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
+            <MicRecorder
+              onTranscript={(t) =>
+                setTextInput((prev) => (prev ? `${prev.trimEnd()} ${t}` : t))
+              }
+              disabled={isSubmitting}
+            />
+            <span className="text-[11px] text-slate-600 hidden sm:inline ml-auto">
               Cmd+Enter to submit
             </span>
             <button
               onClick={() => handleSubmit()}
               disabled={(!textInput.trim() && !whiteboardImage) || isSubmitting}
-              className="ml-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/30 text-white text-sm font-medium rounded-lg transition-colors"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/30 text-white text-sm font-medium rounded-lg transition-colors"
             >
               {isSubmitting
                 ? "Evaluating..."
@@ -554,6 +648,7 @@ export default function SessionWorkspace({
                   : "Submit Text"}
             </button>
           </div>
+          {renderSolutionSection()}
         </div>
       )}
 
@@ -581,6 +676,7 @@ export default function SessionWorkspace({
               Pick Next Problem
             </button>
           </div>
+          <div className="mt-4 text-left">{renderSolutionSection()}</div>
         </div>
       )}
 

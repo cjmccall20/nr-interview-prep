@@ -11,6 +11,11 @@ import {
   isBlankImage,
 } from "@/lib/interview/image-compress"
 import { getOpenAIKey } from "@/lib/interview/openai-key"
+import {
+  CREDITS_ERROR_CODE,
+  CREDITS_MESSAGE,
+  isQuotaError,
+} from "@/lib/interview/errors"
 
 export const maxDuration = 60
 export const runtime = "nodejs"
@@ -32,9 +37,12 @@ interface EvaluateBody {
     prompt_text?: string
     first_principle_target?: string
     solution_outline?: string
+    solution_walkthrough?: string
     parts_json?: ProblemPart[]
     current_part_index?: number
     part_summaries?: { label: string; summary: string }[]
+    assumption_challenges?: string[]
+    challenges_remaining?: number
   }
 }
 
@@ -50,10 +58,7 @@ export async function POST(request: NextRequest) {
   try {
     const apiKey = await getOpenAIKey()
     if (!apiKey) {
-      return jsonError(
-        500,
-        "Server is missing OPENAI_API_KEY. Set it in your deployment env.",
-      )
+      return jsonError(503, CREDITS_MESSAGE, CREDITS_ERROR_CODE)
     }
 
     const body = (await request.json()) as EvaluateBody
@@ -101,11 +106,33 @@ export async function POST(request: NextRequest) {
         role: "system",
         content: `Problem: ${problem_context.prompt_text}\nTarget First Principle: ${problem_context.first_principle_target}${
           problem_context.solution_outline
-            ? `\nSolution Reference (for your evaluation only, never reveal): ${problem_context.solution_outline}`
+            ? `\nSolution Reference (for your evaluation only, never reveal; this is ONE valid path — accept other sound methods): ${problem_context.solution_outline}`
+            : ""
+        }${
+          problem_context.solution_walkthrough
+            ? `\nFull worked solution (answer key, for your evaluation only, never reveal; alternate valid derivations still earn full credit):\n${problem_context.solution_walkthrough}`
             : ""
         }`,
       },
     ]
+
+    // Assumption-challenge context (Rickover "are you sure?"). Only relevant while
+    // grading a derivation/capstone the candidate has otherwise gotten right.
+    const challenges = Array.isArray(problem_context.assumption_challenges)
+      ? problem_context.assumption_challenges
+      : []
+    if (challenges.length > 0 && phase !== "review") {
+      const remaining = problem_context.challenges_remaining ?? challenges.length
+      const used = challenges.length - Math.max(0, Math.min(remaining, challenges.length))
+      const nextChallenge = challenges[used] ?? challenges[challenges.length - 1]
+      messages.push({
+        role: "system",
+        content: `ASSUMPTION CHALLENGES for this problem (pose these one at a time, in order, only once the candidate's primary solution is sound):
+${challenges.map((c, i) => `  ${i + 1}. ${c}`).join("\n")}
+CHALLENGES REMAINING: ${remaining}
+${remaining > 0 ? `Next challenge to pose: "${nextChallenge}". Do NOT emit [PHASE_COMPLETE] until this (and any remaining challenges) have been posed and reasoned through.` : "All challenges exhausted — you may complete once the reasoning is sound."}`,
+      })
+    }
 
     if (isCapstone && problem_context.parts_json) {
       const idx = problem_context.current_part_index ?? 0
@@ -215,10 +242,14 @@ Focus evaluation on the CURRENT part only. If the candidate is clearly correct o
               ? `${err.name}: ${err.message}${err.cause ? ` | cause: ${String(err.cause)}` : ""}${err.stack ? `\n${err.stack}` : ""}`
               : String(err)
           console.error("OpenAI evaluation error:", detail)
+          const credits = isQuotaError(err)
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({
-                error: "AI evaluation failed. Please try again.",
+                error: credits
+                  ? CREDITS_MESSAGE
+                  : "AI evaluation failed. Please try again.",
+                code: credits ? CREDITS_ERROR_CODE : undefined,
                 done: true,
               })}\n\n`,
             ),
@@ -242,8 +273,8 @@ Focus evaluation on the CURRENT part only. If the candidate is clearly correct o
   }
 }
 
-function jsonError(status: number, error: string) {
-  return new Response(JSON.stringify({ error }), {
+function jsonError(status: number, error: string, code?: string) {
+  return new Response(JSON.stringify({ error, code }), {
     status,
     headers: { "Content-Type": "application/json" },
   })

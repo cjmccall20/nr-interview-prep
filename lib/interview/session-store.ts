@@ -128,6 +128,49 @@ export function getProblem(id: string): Problem | null {
 }
 
 /**
+ * Create a fresh session for a SPECIFIC problem (used by "Retry"), bypassing the
+ * random problem picker. Mirrors createSession's capstone initialization.
+ */
+export function createSessionForProblem(problemId: string): Session | null {
+  const problem = getProblem(problemId)
+  if (!problem) return null
+
+  const isCapstone = !!(problem.parts_json && problem.parts_json.length > 0)
+  const now = new Date().toISOString()
+  const session: Session = {
+    id: uuid(),
+    problem_id: problem.id,
+    phase: isCapstone ? "derivation" : "ttfp",
+    started_at: now,
+    completed_at: null,
+    ttfp_seconds: null,
+    flawless_execution: false,
+    total_hints: 0,
+    created_at: now,
+    current_part_index: isCapstone ? 0 : null,
+    part_summaries: isCapstone ? [] : null,
+  }
+
+  writeAll([session, ...readAll()])
+  return session
+}
+
+/**
+ * Wipe session/attempt state so every problem can be tried fresh. Deliberately
+ * PRESERVES the long-term weakness store (progress-store) — accumulated
+ * feedback-over-time must survive a "start over".
+ */
+export function clearAllProgress(): void {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.removeItem(STORAGE_KEY)
+    window.localStorage.removeItem("whiteboard_backup")
+  } catch (e) {
+    console.error("Failed to clear progress:", e)
+  }
+}
+
+/**
  * Legacy helper — normalize any stored phase="review" sessions to "complete",
  * since the "review" phase has been folded into "complete".
  */
