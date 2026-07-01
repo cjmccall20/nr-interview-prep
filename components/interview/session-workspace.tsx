@@ -136,11 +136,14 @@ export default function SessionWorkspace({
   )
   const [partSummaries, setPartSummaries] = useState<PartSummary[]>(initialPartSummaries ?? [])
   const [whiteboardClearSignal, setWhiteboardClearSignal] = useState(0)
-  const [hasAttempted, setHasAttempted] = useState(startingPhase === "complete")
   const [showSolution, setShowSolution] = useState(false)
   const challengesTotal = problem.assumption_challenges?.length ?? 0
   const [challengesUsed, setChallengesUsed] = useState(0)
   const conceptsRef = useRef<string[]>([])
+  // Spoken answer is cached here (not shown in an editable box) and appended to
+  // the submission text so the candidate can't fixate on editing the transcript.
+  const voiceBufferRef = useRef<string>("")
+  const [micStopSignal, setMicStopSignal] = useState(0)
   const [mobileView, setMobileView] = useState<"chat" | "whiteboard">(
     startingPhase === "derivation" ? "whiteboard" : "chat",
   )
@@ -193,15 +196,20 @@ export default function SessionWorkspace({
   }
 
   async function handleSubmit(overrideText?: string, overrideImage?: string) {
-    const text = overrideText ?? textInput.trim()
+    const typed = overrideText ?? textInput.trim()
+    // Fold in any cached spoken answer, then clear it and stop the mic.
+    const spoken = voiceBufferRef.current.trim()
+    const text = [typed, spoken].filter(Boolean).join("\n\n")
     const image = overrideImage ?? whiteboardImage
     if (!text && !image) return
     if (isSubmitting) return
 
+    voiceBufferRef.current = ""
+    setMicStopSignal((n) => n + 1)
+
     setIsSubmitting(true)
     setIsProcessing(true)
     setTimerRunning(false)
-    setHasAttempted(true)
 
     const userText = text || "[Whiteboard submitted for review]"
     if (!overrideText) setTextInput("")
@@ -388,13 +396,14 @@ export default function SessionWorkspace({
     setWhiteboardImage(base64)
     if (phase === "derivation" || phase === "review") {
       const typed = textInput.trim()
-      const text = typed || "Here is my whiteboard work."
       // Clear the box now that its contents are being submitted with the drawing,
       // so the text isn't left behind (and re-sent on the next whiteboard submit).
       if (typed) setTextInput("")
       // On mobile, flip back to chat so the user can watch the fun fact / evaluation.
       if (isMobile) setMobileView("chat")
-      handleSubmit(text, base64)
+      // handleSubmit folds in any cached spoken answer and supplies a fallback
+      // message when nothing was typed.
+      handleSubmit(typed, base64)
     }
   }
 
@@ -430,33 +439,40 @@ export default function SessionWorkspace({
       ? problem.parts_json[currentPartIndex] ?? null
       : null
 
-  // Worked-solution reveal, gated on the candidate having an attempt on record.
+  // Worked-solution reveal. Before the problem is complete, clicking prompts a
+  // confirmation that encourages struggling through it first (interview realism).
+  const SOLUTION_WARNING =
+    "Are you sure you want to see the worked solution?\n\n" +
+    "It's best to struggle through it first, like a real interview. You'll likely be " +
+    "asked things you don't immediately know how to solve — the skill they're watching " +
+    "for is how far you can reason through the process on your own.\n\n" +
+    "Reveal the solution anyway?"
+
   const renderSolutionSection = () => {
     if (!problem.solution_walkthrough) return null
-    const unlocked = hasAttempted || phase === "complete"
-    if (!unlocked) {
-      return (
-        <div className="mt-3 rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2.5">
-          <div className="text-xs text-slate-400 leading-relaxed">
-            <span className="text-slate-300 font-medium">
-              Give it an honest attempt first
-            </span>{" "}
-            — the full worked solution unlocks after you submit. Even if you&apos;re
-            unsure how to solve it, working through your reasoning is the real skill:
-            on the actual interview you may get a problem you can&apos;t immediately
-            crack, and they&apos;re watching how you reason through it.
-          </div>
-        </div>
-      )
+    const completed = phase === "complete"
+    const handleReveal = () => {
+      if (showSolution) {
+        setShowSolution(false)
+        return
+      }
+      if (!completed && !window.confirm(SOLUTION_WARNING)) return
+      setShowSolution(true)
     }
     return (
       <div className="mt-3">
         <button
-          onClick={() => setShowSolution((v) => !v)}
+          onClick={handleReveal}
           className="text-xs px-3 py-1.5 rounded border border-blue-500/40 text-blue-300 hover:bg-blue-500/10 transition-colors"
         >
           {showSolution ? "Hide worked solution" : "View worked solution"}
         </button>
+        {!completed && !showSolution && (
+          <div className="mt-1 text-[11px] text-slate-500">
+            Best to work it through fully first — in the real interview you&apos;ll be
+            asked things you can&apos;t immediately solve.
+          </div>
+        )}
         {showSolution && (
           <div className="mt-2 rounded-lg border border-[#334155] bg-[#0f172a] px-4 py-3 max-h-[50vh] overflow-y-auto">
             <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">
@@ -632,9 +648,10 @@ export default function SessionWorkspace({
           />
           <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
             <MicRecorder
-              onTranscript={(t) =>
-                setTextInput((prev) => (prev ? `${prev.trimEnd()} ${t}` : t))
-              }
+              onTranscript={(t) => {
+                voiceBufferRef.current += t
+              }}
+              stopSignal={micStopSignal}
               disabled={isSubmitting}
             />
             <span className="text-[11px] text-slate-600 hidden sm:inline ml-auto">

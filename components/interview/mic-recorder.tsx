@@ -4,8 +4,13 @@ import { useEffect, useRef, useState } from "react"
 import { Mic, MicOff } from "lucide-react"
 
 interface MicRecorderProps {
-  /** Called with finalized transcript text; the parent appends it to its input. */
+  /**
+   * Called with finalized transcript chunks. The parent CACHES these (it does
+   * not show them in an editable box) and sends them to the AI on submit.
+   */
   onTranscript: (text: string) => void
+  /** When this number increments, the mic stops (parent bumps it on submit). */
+  stopSignal?: number
   disabled?: boolean
 }
 
@@ -39,16 +44,19 @@ function getRecognitionCtor(): SpeechRecognitionCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null
 }
 
-export default function MicRecorder({ onTranscript, disabled }: MicRecorderProps) {
+export default function MicRecorder({ onTranscript, stopSignal, disabled }: MicRecorderProps) {
   const [supported, setSupported] = useState(true)
   const [listening, setListening] = useState(false)
-  const [interim, setInterim] = useState("")
   const [error, setError] = useState<string | null>(null)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  // Keep listening across the browser's automatic silence timeouts until the
+  // user stops or the problem is submitted.
+  const keepAliveRef = useRef(false)
 
   useEffect(() => {
     setSupported(getRecognitionCtor() !== null)
     return () => {
+      keepAliveRef.current = false
       try {
         recognitionRef.current?.stop()
       } catch {
@@ -57,13 +65,24 @@ export default function MicRecorder({ onTranscript, disabled }: MicRecorderProps
     }
   }, [])
 
-  function start() {
+  // Parent-driven stop (on submit).
+  useEffect(() => {
+    if (stopSignal === undefined || stopSignal === 0) return
+    keepAliveRef.current = false
+    try {
+      recognitionRef.current?.stop()
+    } catch {
+      // ignore
+    }
+    setListening(false)
+  }, [stopSignal])
+
+  function beginRecognition() {
     const Ctor = getRecognitionCtor()
     if (!Ctor) {
       setSupported(false)
       return
     }
-    setError(null)
     const recognition = new Ctor()
     recognition.lang = "en-US"
     recognition.continuous = true
@@ -71,32 +90,37 @@ export default function MicRecorder({ onTranscript, disabled }: MicRecorderProps
 
     recognition.onresult = (e) => {
       let finalText = ""
-      let interimText = ""
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i]
-        const chunk = res[0]?.transcript ?? ""
-        if (res.isFinal) finalText += chunk
-        else interimText += chunk
+        if (res.isFinal) finalText += res[0]?.transcript ?? ""
       }
-      if (finalText) {
-        onTranscript(finalText.trim() + " ")
-      }
-      setInterim(interimText)
+      if (finalText) onTranscript(finalText.trim() + " ")
     }
-    recognition.onerror = (e) => {
-      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+    recognition.onerror = (ev) => {
+      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+        keepAliveRef.current = false
         setError(
           "Microphone blocked — enable it in your browser's site settings, then try again.",
         )
-      } else if (e.error === "no-speech") {
-        setError("Didn't catch that — try speaking again.")
-      } else if (e.error !== "aborted") {
-        setError("Voice input hiccuped. Try again.")
+        setListening(false)
+      } else if (ev.error === "no-speech" || ev.error === "aborted") {
+        // transient — onend will auto-restart if we're still keep-alive
+      } else {
+        setError("Voice input hiccuped — it will keep trying.")
       }
     }
     recognition.onend = () => {
+      // Auto-restart to survive the browser's silence auto-stop, until the user
+      // stops or the problem is submitted.
+      if (keepAliveRef.current) {
+        try {
+          beginRecognition()
+          return
+        } catch {
+          // fall through
+        }
+      }
       setListening(false)
-      setInterim("")
     }
 
     try {
@@ -104,12 +128,34 @@ export default function MicRecorder({ onTranscript, disabled }: MicRecorderProps
       recognitionRef.current = recognition
       setListening(true)
     } catch {
-      setError("Could not start the microphone. Try again.")
-      setListening(false)
+      // start() throws if called too soon after a previous end; retry shortly.
+      if (keepAliveRef.current) {
+        setTimeout(() => {
+          try {
+            recognition.start()
+            recognitionRef.current = recognition
+            setListening(true)
+          } catch {
+            setError("Could not start the microphone. Try again.")
+            setListening(false)
+          }
+        }, 250)
+      }
     }
   }
 
+  function start() {
+    if (getRecognitionCtor() === null) {
+      setSupported(false)
+      return
+    }
+    setError(null)
+    keepAliveRef.current = true
+    beginRecognition()
+  }
+
   function stop() {
+    keepAliveRef.current = false
     try {
       recognitionRef.current?.stop()
     } catch {
@@ -155,9 +201,9 @@ export default function MicRecorder({ onTranscript, disabled }: MicRecorderProps
           </>
         )}
       </button>
-      {listening && interim && (
-        <div className="text-[11px] text-slate-400 italic truncate max-w-[260px]">
-          {interim}
+      {listening && (
+        <div className="text-[11px] text-slate-400">
+          Listening — your spoken answer is captured and sent when you submit.
         </div>
       )}
       {error && <div className="text-[11px] text-amber-400">{error}</div>}
