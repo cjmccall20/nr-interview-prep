@@ -14,9 +14,12 @@ interface EvaluatePayload {
     prompt_text: string
     first_principle_target: string
     solution_outline?: string
+    solution_walkthrough?: string
     parts_json?: ProblemPart[]
     current_part_index?: number
     part_summaries?: PartSummary[]
+    assumption_challenges?: string[]
+    challenges_remaining?: number
   }
 }
 

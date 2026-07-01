@@ -6,6 +6,11 @@ import {
   TIER_2_FRAMEWORKS,
 } from "@/lib/interview/ai-prompts"
 import { getOpenAIKey } from "@/lib/interview/openai-key"
+import {
+  CREDITS_ERROR_CODE,
+  CREDITS_MESSAGE,
+  isQuotaError,
+} from "@/lib/interview/errors"
 
 export const maxDuration = 30
 export const runtime = "nodejs"
@@ -51,8 +56,8 @@ export async function POST(request: NextRequest) {
     const apiKey = await getOpenAIKey()
     if (!apiKey) {
       return NextResponse.json(
-        { error: "Server is missing OPENAI_API_KEY for tier-3 hints." },
-        { status: 500 },
+        { error: CREDITS_MESSAGE, code: CREDITS_ERROR_CODE },
+        { status: 503 },
       )
     }
 
@@ -87,6 +92,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ hint, tier: 3 })
   } catch (error) {
     console.error("Hint generation error:", error)
+    if (isQuotaError(error)) {
+      return NextResponse.json(
+        { error: CREDITS_MESSAGE, code: CREDITS_ERROR_CODE },
+        { status: 503 },
+      )
+    }
     return NextResponse.json(
       { error: "Failed to generate hint" },
       { status: 500 },

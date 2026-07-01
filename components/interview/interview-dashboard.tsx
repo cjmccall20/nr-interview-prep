@@ -6,11 +6,17 @@ import Link from "next/link"
 import type { Problem, ProblemTier, Session } from "@/lib/interview/types"
 import { PROBLEMS } from "@/lib/interview/problems"
 import {
+  clearAllProgress,
   createSession,
+  createSessionForProblem,
   deleteSession,
   listSessions,
   migrateLegacyPhases,
 } from "@/lib/interview/session-store"
+import {
+  getWeaknessRanking,
+  type WeaknessRow,
+} from "@/lib/interview/progress-store"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MarkdownWithMath } from "@/components/interview/markdown-with-math"
 
@@ -114,10 +120,12 @@ export default function InterviewDashboard() {
   const [solvedExpanded, setSolvedExpanded] = useState(false)
   const [inProgressExpanded, setInProgressExpanded] = useState(true)
   const [welcomeDismissed, setWelcomeDismissed] = useState(true)
+  const [weakness, setWeakness] = useState<WeaknessRow[]>([])
 
   useEffect(() => {
     migrateLegacyPhases()
     setSessions(listSessions())
+    setWeakness(getWeaknessRanking())
     setLoading(false)
     if (typeof window !== "undefined") {
       const dismissed = window.sessionStorage.getItem(WELCOME_DISMISS_KEY)
@@ -163,6 +171,35 @@ export default function InterviewDashboard() {
       setSessions((prev) => prev.filter((s) => s.id !== sessionId))
     } catch (error) {
       console.error("Failed to discard session:", error)
+    }
+  }
+
+  function handleClearAll() {
+    const ok = window.confirm(
+      "Clear all progress and start over? Every question becomes fresh and re-attemptable. Your long-term “Areas to Review” history is kept.",
+    )
+    if (!ok) return
+    try {
+      clearAllProgress()
+      setSessions([])
+    } catch (error) {
+      console.error("Failed to clear progress:", error)
+    }
+  }
+
+  function retryProblem(problemId: string) {
+    setStartingSession(true)
+    try {
+      const session = createSessionForProblem(problemId)
+      if (!session) {
+        window.alert("Could not start a retry for that problem.")
+        return
+      }
+      router.push(`/interview/session/${session.id}`)
+    } catch (error) {
+      console.error("Failed to retry problem:", error)
+    } finally {
+      setStartingSession(false)
     }
   }
 
@@ -234,11 +271,22 @@ export default function InterviewDashboard() {
               Socratic AI tutor for Naval Reactors interview prep
             </p>
           </div>
-          <div className="sm:text-right">
-            <div className="text-sm text-slate-500">Sessions completed</div>
-            <div className="text-2xl font-bold text-emerald-400">
-              {completedSessions.length}
+          <div className="flex items-center gap-4">
+            <div className="sm:text-right">
+              <div className="text-sm text-slate-500">Sessions completed</div>
+              <div className="text-2xl font-bold text-emerald-400">
+                {completedSessions.length}
+              </div>
             </div>
+            {sessions.length > 0 && (
+              <button
+                onClick={handleClearAll}
+                className="text-xs text-red-400 border border-red-500/30 rounded px-3 py-1.5 hover:bg-red-500/10 whitespace-nowrap"
+                title="Clear all progress and start over (keeps long-term weakness history)"
+              >
+                Clear all progress
+              </button>
+            )}
           </div>
         </div>
 
@@ -374,17 +422,92 @@ export default function InterviewDashboard() {
                           {p && <span>Difficulty {p.difficulty}/5</span>}
                         </div>
                       </div>
-                      {s.flawless_execution && (
-                        <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded whitespace-nowrap">
-                          Flawless
-                        </span>
-                      )}
+                      <div className="flex flex-col items-end gap-1.5">
+                        {s.flawless_execution && (
+                          <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded whitespace-nowrap">
+                            Flawless
+                          </span>
+                        )}
+                        <button
+                          onClick={() => retryProblem(s.problem_id)}
+                          disabled={startingSession}
+                          className="px-3 py-1 text-xs text-blue-400 border border-blue-500/40 rounded hover:bg-blue-500/10 disabled:opacity-40 whitespace-nowrap"
+                          title="Attempt this problem again from scratch"
+                        >
+                          Retry
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {weakness.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+            Areas to Review
+          </h2>
+          <p className="text-slate-400 text-sm mt-1 mb-3">
+            Where you&apos;ve leaned on hints or missed clean runs over time. This
+            history persists even when you clear progress.
+          </p>
+          <div className="space-y-2">
+            {weakness.slice(0, 5).map((w) => {
+              const flawlessRate =
+                w.completions > 0
+                  ? Math.round((w.flawless / w.completions) * 100)
+                  : 0
+              const level =
+                w.weaknessScore >= 0.6
+                  ? { label: "Needs work", cls: "text-red-400 border-red-500/30 bg-red-500/5" }
+                  : w.weaknessScore >= 0.3
+                    ? { label: "Shaky", cls: "text-amber-400 border-amber-500/30 bg-amber-500/5" }
+                    : { label: "Solid", cls: "text-emerald-400 border-emerald-500/30 bg-emerald-500/5" }
+              return (
+                <div
+                  key={w.topic}
+                  className="p-4 rounded-lg bg-[#1e293b] border border-[#334155] flex items-start justify-between gap-4"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-white font-medium text-sm">{w.topic}</span>
+                      <span className={`text-[11px] px-2 py-0.5 rounded border ${level.cls}`}>
+                        {level.label}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {w.completions} solved · {flawlessRate}% flawless · {w.totalHints}{" "}
+                      consult{w.totalHints !== 1 ? "s" : ""} used
+                    </div>
+                    {w.topConcepts.length > 0 && (
+                      <ul className="mt-2 flex flex-wrap gap-1.5">
+                        {w.topConcepts.map((c) => (
+                          <li
+                            key={c.concept}
+                            className="text-[11px] text-slate-300 bg-[#0f172a] border border-[#334155] rounded px-2 py-0.5"
+                          >
+                            {c.concept}
+                            {c.count > 1 ? ` ×${c.count}` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => startSession({ topic: w.topic })}
+                    disabled={startingSession}
+                    className="px-3 py-1.5 text-xs text-blue-400 border border-blue-500/40 rounded hover:bg-blue-500/10 disabled:opacity-40 whitespace-nowrap"
+                  >
+                    Practice this
+                  </button>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 

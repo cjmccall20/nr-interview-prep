@@ -23,6 +23,18 @@ export interface Problem {
   time_limit_seconds: number | null
   parts_json: ProblemPart[] | null
   tier: ProblemTier
+  /**
+   * Full Chegg-style worked solution (Markdown + KaTeX), authored up front by a
+   * higher-tier model. Revealed to the candidate only after they attempt the
+   * problem; also passed to the grader as an evaluation-only answer key.
+   */
+  solution_walkthrough?: string
+  /**
+   * Ordered list of "are you sure?" follow-ups that challenge a core simplifying
+   * assumption (e.g. "now assume air drag"). Authored only for problems where an
+   * assumption materially changes the answer; absent/empty for procedural problems.
+   */
+  assumption_challenges?: string[]
 }
 
 export type SessionPhase = 'ttfp' | 'derivation' | 'review' | 'complete'
