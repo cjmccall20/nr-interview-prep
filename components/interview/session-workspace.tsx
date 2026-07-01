@@ -387,7 +387,11 @@ export default function SessionWorkspace({
   function handleWhiteboardExport(base64: string) {
     setWhiteboardImage(base64)
     if (phase === "derivation" || phase === "review") {
-      const text = textInput.trim() || "Here is my whiteboard work."
+      const typed = textInput.trim()
+      const text = typed || "Here is my whiteboard work."
+      // Clear the box now that its contents are being submitted with the drawing,
+      // so the text isn't left behind (and re-sent on the next whiteboard submit).
+      if (typed) setTextInput("")
       // On mobile, flip back to chat so the user can watch the fun fact / evaluation.
       if (isMobile) setMobileView("chat")
       handleSubmit(text, base64)
