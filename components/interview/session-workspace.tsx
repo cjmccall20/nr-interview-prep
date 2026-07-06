@@ -19,6 +19,7 @@ import ChatLog, { type ChatMessage } from "./chat-log"
 import FunFact from "./fun-fact"
 import MicRecorder from "./mic-recorder"
 import { MarkdownWithMath } from "./markdown-with-math"
+import MethodologyGuide from "./methodology-guide"
 import { streamEvaluation, requestHint } from "@/lib/interview/stream"
 import { deleteSession, updateSession } from "@/lib/interview/session-store"
 import { recordOutcome } from "@/lib/interview/progress-store"
@@ -718,6 +719,7 @@ export default function SessionWorkspace({
             : undefined
       }
       clearSignal={whiteboardClearSignal}
+      storageKey={`whiteboard_backup_${sessionId}`}
     />
   )
 
@@ -765,6 +767,7 @@ export default function SessionWorkspace({
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+          <MethodologyGuide />
           {showTimer && (
             <PhaseTimer
               duration={config.duration}

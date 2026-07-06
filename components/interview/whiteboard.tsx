@@ -25,6 +25,12 @@ interface WhiteboardProps {
   disabledReason?: string
   /** Parent increments this counter to request a canvas clear (e.g., after a capstone part completes). */
   clearSignal?: number
+  /**
+   * localStorage key for the auto-backup. Keyed per problem/session so that
+   * reopening the same question restores its board, while opening a different
+   * question starts blank. Defaults to the legacy shared key.
+   */
+  storageKey?: string
 }
 
 const COLORS = [
@@ -44,7 +50,8 @@ interface EditingState {
   color: string
 }
 
-export default function Whiteboard({ onExport, disabled, disabledReason, clearSignal }: WhiteboardProps) {
+export default function Whiteboard({ onExport, disabled, disabledReason, clearSignal, storageKey }: WhiteboardProps) {
+  const backupKey = storageKey ?? "whiteboard_backup"
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -139,17 +146,17 @@ export default function Whiteboard({ onExport, disabled, disabledReason, clearSi
     const interval = setInterval(() => {
       if (strokes.length > 0 || texts.length > 0) {
         localStorage.setItem(
-          "whiteboard_backup",
+          backupKey,
           JSON.stringify({ strokes, texts }),
         )
       }
     }, 10000)
     return () => clearInterval(interval)
-  }, [strokes, texts])
+  }, [strokes, texts, backupKey])
 
-  // Restore from backup on mount (supports the legacy array-of-strokes format).
+  // Restore this question's board on mount (supports the legacy array-of-strokes format).
   useEffect(() => {
-    const backup = localStorage.getItem("whiteboard_backup")
+    const backup = localStorage.getItem(backupKey)
     if (backup) {
       try {
         const parsed = JSON.parse(backup)
@@ -167,7 +174,7 @@ export default function Whiteboard({ onExport, disabled, disabledReason, clearSi
         // Ignore corrupt backup
       }
     }
-  }, [])
+  }, [backupKey])
 
   // Re-render whenever content changes (hiding the box currently being edited).
   useEffect(() => {
@@ -328,7 +335,7 @@ export default function Whiteboard({ onExport, disabled, disabledReason, clearSi
     setTexts([])
     setUndoStack([])
     setEditing(null)
-    localStorage.removeItem("whiteboard_backup")
+    localStorage.removeItem(backupKey)
   }
 
   // Clear when the parent bumps clearSignal (capstone part advance).
@@ -338,8 +345,8 @@ export default function Whiteboard({ onExport, disabled, disabledReason, clearSi
     setTexts([])
     setUndoStack([])
     setEditing(null)
-    localStorage.removeItem("whiteboard_backup")
-  }, [clearSignal])
+    localStorage.removeItem(backupKey)
+  }, [clearSignal, backupKey])
 
   function exportCanvas() {
     const canvas = canvasRef.current
