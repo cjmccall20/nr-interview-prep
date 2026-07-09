@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import {
   MessageSquare,
+  Mic,
   PencilLine,
   Timer,
   Trash2,
@@ -11,6 +12,7 @@ import {
   ChevronLeft,
   ChevronDown,
   ChevronUp,
+  X,
 } from "lucide-react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable-panels"
 import Whiteboard from "./whiteboard"
@@ -20,7 +22,15 @@ import FunFact from "./fun-fact"
 import MicRecorder from "./mic-recorder"
 import { MarkdownWithMath } from "./markdown-with-math"
 import MethodologyGuide from "./methodology-guide"
+import ThinkAloudGuide from "./think-aloud-guide"
 import { streamEvaluation, requestHint } from "@/lib/interview/stream"
+import {
+  computeVerbalStats,
+  formatDuration,
+  formatTranscriptForGrader,
+  type TranscriptEvent,
+  type VerbalStats,
+} from "@/lib/interview/transcript"
 import { deleteSession, updateSession } from "@/lib/interview/session-store"
 import { recordOutcome } from "@/lib/interview/progress-store"
 import type { PartSummary, Problem, SessionPhase } from "@/lib/interview/types"
@@ -69,10 +79,10 @@ function openingMessageFor(phase: SessionPhase, problem: Problem): string | null
   if (phase === "derivation") {
     if (problem.parts_json && problem.parts_json.length > 0) {
       const mins = Math.round((problem.time_limit_seconds ?? DEFAULT_DERIVATION_SECONDS) / 60)
-      return `Capstone mode: ${problem.parts_json.length} parts, ${mins}-minute timer spans the whole problem. Solve part (a) first — I will only advance you once you have justified the governing constraint, not just stated a number. Carry results forward as the parts chain.`
+      return `Capstone mode: ${problem.parts_json.length} parts, ${mins}-minute timer spans the whole problem. Turn your mic on and think aloud as you work — I evaluate your narration like a real board would. Solve part (a) first; I will only advance you once you have justified the governing constraint, not just stated a number. Carry results forward as the parts chain.`
     }
     const mins = Math.round((problem.time_limit_seconds ?? DEFAULT_DERIVATION_SECONDS) / 60)
-    return `Good. Now derive the result on the whiteboard — you have ${mins} minute${mins === 1 ? "" : "s"}. Use the text box to narrate or ask clarifying questions. Click 'Submit Whiteboard' when you want me to evaluate your work.`
+    return `Good. Now derive the result on the whiteboard — you have ${mins} minute${mins === 1 ? "" : "s"}. Keep your mic on and talk through your reasoning as you work — I'm listening, just like a real board. Click 'Submit Whiteboard' when you want me to evaluate your work.`
   }
   return null
 }
@@ -145,6 +155,20 @@ export default function SessionWorkspace({
   // the submission text so the candidate can't fixate on editing the transcript.
   const voiceBufferRef = useRef<string>("")
   const [micStopSignal, setMicStopSignal] = useState(0)
+  const [micStartSignal, setMicStartSignal] = useState(0)
+  // Timestamped think-aloud log for the work phase: speech chunks and mic
+  // on/off events, stamped in seconds since verbalClockRef. Sent to the grader
+  // on every submission so it can coach communication with real timestamps.
+  const transcriptRef = useRef<TranscriptEvent[]>([])
+  const verbalClockRef = useRef<number>(Date.now())
+  const lastSpeechAtRef = useRef<number>(0)
+  const silenceNudgeArmedRef = useRef(true)
+  const [micListening, setMicListening] = useState(false)
+  const [micEverOn, setMicEverOn] = useState(false)
+  const [micBannerDismissed, setMicBannerDismissed] = useState(false)
+  const [showSilenceNudge, setShowSilenceNudge] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(false)
+  const [finalVerbalStats, setFinalVerbalStats] = useState<VerbalStats | null>(null)
   const [mobileView, setMobileView] = useState<"chat" | "whiteboard">(
     startingPhase === "derivation" ? "whiteboard" : "chat",
   )
@@ -189,6 +213,62 @@ export default function SessionWorkspace({
     setMessages((prev) => [...prev, { role, content }])
   }, [])
 
+  // Seconds since the work-phase clock started (resets at derivation start).
+  const nowT = useCallback(() => (Date.now() - verbalClockRef.current) / 1000, [])
+  const micListeningRef = useRef(false)
+
+  const handleSpokenChunk = useCallback(
+    (t: string) => {
+      voiceBufferRef.current += t
+      const text = t.trim()
+      if (text) {
+        transcriptRef.current.push({ t: nowT(), kind: "speech", text })
+        lastSpeechAtRef.current = nowT()
+        silenceNudgeArmedRef.current = true
+        setShowSilenceNudge(false)
+      }
+    },
+    [nowT],
+  )
+
+  const handleMicListeningChange = useCallback(
+    (listening: boolean) => {
+      transcriptRef.current.push({ t: nowT(), kind: listening ? "mic_on" : "mic_off" })
+      micListeningRef.current = listening
+      setMicListening(listening)
+      if (listening) {
+        setMicEverOn(true)
+        lastSpeechAtRef.current = nowT()
+        silenceNudgeArmedRef.current = true
+      } else {
+        setShowSilenceNudge(false)
+      }
+    },
+    [nowT],
+  )
+
+  const [micSupported, setMicSupported] = useState(true)
+  useEffect(() => {
+    const w = window as unknown as {
+      SpeechRecognition?: unknown
+      webkitSpeechRecognition?: unknown
+    }
+    setMicSupported(!!(w.SpeechRecognition ?? w.webkitSpeechRecognition))
+  }, [])
+
+  // Gentle real-time nudge: mic is on but nothing has been said for 45s.
+  useEffect(() => {
+    if (!micListening || phase === "complete" || isSubmitting) return
+    const id = setInterval(() => {
+      const quietFor = nowT() - lastSpeechAtRef.current
+      if (quietFor >= 45 && silenceNudgeArmedRef.current) {
+        silenceNudgeArmedRef.current = false
+        setShowSilenceNudge(true)
+      }
+    }, 5000)
+    return () => clearInterval(id)
+  }, [micListening, phase, isSubmitting, nowT])
+
   function getConversationHistory(): { role: string; content: string }[] {
     return messages.slice(-6).map((m) => ({
       role: m.role === "user" ? "user" : "assistant",
@@ -221,6 +301,9 @@ export default function SessionWorkspace({
       phase,
       text_response: userText,
       whiteboard_image: image || undefined,
+      verbal_transcript:
+        formatTranscriptForGrader(transcriptRef.current, nowT()) || undefined,
+      mic_used: transcriptRef.current.some((e) => e.kind === "mic_on"),
       conversation_history: getConversationHistory(),
       problem_context: {
         prompt_text: problem.prompt_text,
@@ -317,6 +400,15 @@ export default function SessionWorkspace({
       timerStartedRef.current = true
       setWhiteboardImage(null)
       phaseStartRef.current = Date.now()
+      // Restart the think-aloud clock at the top of the work phase so the
+      // grader's timestamps read as "time into the derivation". Re-seed the
+      // mic state if the candidate is already listening.
+      verbalClockRef.current = Date.now()
+      transcriptRef.current = micListeningRef.current
+        ? [{ t: 0, kind: "mic_on" }]
+        : []
+      lastSpeechAtRef.current = 0
+      silenceNudgeArmedRef.current = true
       // On phones, nudge the user toward the whiteboard once the principle is locked.
       if (isMobile) setMobileView("whiteboard")
       setPromptExpandedMobile(false)
@@ -326,6 +418,13 @@ export default function SessionWorkspace({
     } else if (phase === "derivation") {
       setPhase("complete")
       setTimerRunning(false)
+      // Freeze the talk-time stats at the moment of completion.
+      setFinalVerbalStats(
+        transcriptRef.current.length > 0
+          ? computeVerbalStats(transcriptRef.current, nowT())
+          : null,
+      )
+      setShowSilenceNudge(false)
       if (isMobile) setMobileView("chat")
       const flawless = hintTier === 0
       saveSessionUpdate(sessionId, {
@@ -620,6 +719,55 @@ export default function SessionWorkspace({
 
       {phase !== "complete" && (
         <div className="p-4 border-t border-[#334155]">
+          {/* Mic recommendation — the real interview is oral. */}
+          {micSupported && !micEverOn && !micBannerDismissed && (
+            <div className="mb-2 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+              <Mic className="h-4 w-4 text-amber-300 flex-shrink-0 mt-0.5" aria-hidden />
+              <div className="flex-1 text-xs text-amber-200 leading-relaxed">
+                Interviewers can&apos;t read your mind — keep the mic on and think
+                aloud the whole time. You&apos;ll get feedback on it.{" "}
+                <button
+                  onClick={() => setGuideOpen(true)}
+                  className="underline underline-offset-2 hover:text-amber-100"
+                >
+                  Why?
+                </button>
+              </div>
+              <button
+                onClick={() => setMicStartSignal((n) => n + 1)}
+                className="flex-shrink-0 px-2.5 py-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs font-medium hover:bg-amber-500/30 transition-colors"
+              >
+                Turn on mic
+              </button>
+              <button
+                onClick={() => setMicBannerDismissed(true)}
+                className="flex-shrink-0 text-amber-400/60 hover:text-amber-300"
+                aria-label="Dismiss"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            </div>
+          )}
+
+          {/* Silence nudge — mic on, quiet for 45s+. */}
+          {showSilenceNudge && (
+            <div className="mb-2 flex items-start gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2">
+              <MessageSquare className="h-4 w-4 text-blue-300 flex-shrink-0 mt-0.5" aria-hidden />
+              <div className="flex-1 text-xs text-blue-200 leading-relaxed">
+                You&apos;ve gone quiet — talk through what you&apos;re doing. Even
+                &ldquo;I&apos;m going to pause and write this out, then explain
+                it&rdquo; keeps your interviewer with you.
+              </div>
+              <button
+                onClick={() => setShowSilenceNudge(false)}
+                className="flex-shrink-0 text-blue-400/60 hover:text-blue-300"
+                aria-label="Dismiss"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            </div>
+          )}
+
           <div className="text-xs text-slate-500 mb-1.5">
             {phase === "ttfp"
               ? "Step 1 of 2 — Name the governing principle (e.g., \"conservation of energy\"). Brief is fine; precision comes in the next step."
@@ -649,10 +797,10 @@ export default function SessionWorkspace({
           />
           <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
             <MicRecorder
-              onTranscript={(t) => {
-                voiceBufferRef.current += t
-              }}
+              onTranscript={handleSpokenChunk}
+              onListeningChange={handleMicListeningChange}
               stopSignal={micStopSignal}
+              startSignal={micStartSignal}
               disabled={isSubmitting}
             />
             <span className="text-[11px] text-slate-600 hidden sm:inline ml-auto">
@@ -679,10 +827,39 @@ export default function SessionWorkspace({
           <div className="text-emerald-400 text-xl font-semibold mb-1">
             Problem Complete
           </div>
-          <div className="text-slate-400 text-sm mb-4">
+          <div className="text-slate-400 text-sm mb-1">
             {hintTier === 0
               ? "Flawless execution — no consults requested."
               : `${hintTier} consult${hintTier !== 1 ? "s" : ""} used.`}
+          </div>
+          <div className="text-slate-500 text-xs mb-4">
+            {finalVerbalStats && finalVerbalStats.micOnSeconds > 0 ? (
+              <>
+                Talked through{" "}
+                {Math.min(
+                  100,
+                  Math.round(
+                    (finalVerbalStats.micOnSeconds /
+                      Math.max(1, finalVerbalStats.elapsedSeconds)) *
+                      100,
+                  ),
+                )}
+                % of the session · longest silence{" "}
+                {formatDuration(finalVerbalStats.longestSilenceSeconds)} ·{" "}
+                {finalVerbalStats.utteranceCount} spoken thought
+                {finalVerbalStats.utteranceCount !== 1 ? "s" : ""}
+              </>
+            ) : (
+              <>
+                Mic unused — next time keep it on and narrate your reasoning.{" "}
+                <button
+                  onClick={() => setGuideOpen(true)}
+                  className="underline underline-offset-2 hover:text-slate-300"
+                >
+                  See the Think-Aloud Guide
+                </button>
+              </>
+            )}
           </div>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <button
@@ -767,6 +944,7 @@ export default function SessionWorkspace({
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+          <ThinkAloudGuide open={guideOpen} onOpenChange={setGuideOpen} />
           <MethodologyGuide />
           {showTimer && (
             <PhaseTimer

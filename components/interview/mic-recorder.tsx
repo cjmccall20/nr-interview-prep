@@ -9,8 +9,16 @@ interface MicRecorderProps {
    * not show them in an editable box) and sends them to the AI on submit.
    */
   onTranscript: (text: string) => void
+  /**
+   * Fires on real listening transitions (user/parent start & stop) — NOT on
+   * the keep-alive auto-restarts that survive the browser's silence timeout.
+   * The parent uses this to log mic on/off into the think-aloud transcript.
+   */
+  onListeningChange?: (listening: boolean) => void
   /** When this number increments, the mic stops (parent bumps it on submit). */
   stopSignal?: number
+  /** When this number increments, the mic starts (parent nudge/banner). */
+  startSignal?: number
   disabled?: boolean
 }
 
@@ -44,7 +52,13 @@ function getRecognitionCtor(): SpeechRecognitionCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null
 }
 
-export default function MicRecorder({ onTranscript, stopSignal, disabled }: MicRecorderProps) {
+export default function MicRecorder({
+  onTranscript,
+  onListeningChange,
+  stopSignal,
+  startSignal,
+  disabled,
+}: MicRecorderProps) {
   const [supported, setSupported] = useState(true)
   const [listening, setListening] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -52,6 +66,17 @@ export default function MicRecorder({ onTranscript, stopSignal, disabled }: MicR
   // Keep listening across the browser's automatic silence timeouts until the
   // user stops or the problem is submitted.
   const keepAliveRef = useRef(false)
+  // Tracks whether the parent has been told we're listening, so keep-alive
+  // restarts never emit spurious off/on transitions.
+  const reportedListeningRef = useRef(false)
+  const onListeningChangeRef = useRef(onListeningChange)
+  onListeningChangeRef.current = onListeningChange
+
+  function reportListening(next: boolean) {
+    if (reportedListeningRef.current === next) return
+    reportedListeningRef.current = next
+    onListeningChangeRef.current?.(next)
+  }
 
   useEffect(() => {
     setSupported(getRecognitionCtor() !== null)
@@ -62,7 +87,9 @@ export default function MicRecorder({ onTranscript, stopSignal, disabled }: MicR
       } catch {
         // ignore
       }
+      reportListening(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Parent-driven stop (on submit).
@@ -75,7 +102,16 @@ export default function MicRecorder({ onTranscript, stopSignal, disabled }: MicR
       // ignore
     }
     setListening(false)
+    reportListening(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopSignal])
+
+  // Parent-driven start (mic recommendation banner / nudges).
+  useEffect(() => {
+    if (startSignal === undefined || startSignal === 0) return
+    if (!keepAliveRef.current) start()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startSignal])
 
   function beginRecognition() {
     const Ctor = getRecognitionCtor()
@@ -103,6 +139,7 @@ export default function MicRecorder({ onTranscript, stopSignal, disabled }: MicR
           "Microphone blocked — enable it in your browser's site settings, then try again.",
         )
         setListening(false)
+        reportListening(false)
       } else if (ev.error === "no-speech" || ev.error === "aborted") {
         // transient — onend will auto-restart if we're still keep-alive
       } else {
@@ -121,12 +158,14 @@ export default function MicRecorder({ onTranscript, stopSignal, disabled }: MicR
         }
       }
       setListening(false)
+      reportListening(false)
     }
 
     try {
       recognition.start()
       recognitionRef.current = recognition
       setListening(true)
+      reportListening(true)
     } catch {
       // start() throws if called too soon after a previous end; retry shortly.
       if (keepAliveRef.current) {
@@ -135,9 +174,11 @@ export default function MicRecorder({ onTranscript, stopSignal, disabled }: MicR
             recognition.start()
             recognitionRef.current = recognition
             setListening(true)
+            reportListening(true)
           } catch {
             setError("Could not start the microphone. Try again.")
             setListening(false)
+            reportListening(false)
           }
         }, 250)
       }
@@ -162,6 +203,7 @@ export default function MicRecorder({ onTranscript, stopSignal, disabled }: MicR
       // ignore
     }
     setListening(false)
+    reportListening(false)
   }
 
   if (!supported) {
@@ -169,8 +211,8 @@ export default function MicRecorder({ onTranscript, stopSignal, disabled }: MicR
       <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
         <MicOff className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
         <span>
-          Voice input works in Google Chrome. Open this page in Chrome to dictate,
-          or just type your answer below.
+          Voice input needs Chrome, Edge, or Safari. Open this page there to
+          think aloud, or narrate your reasoning in writing below.
         </span>
       </div>
     )
@@ -185,9 +227,13 @@ export default function MicRecorder({ onTranscript, stopSignal, disabled }: MicR
         className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
           listening
             ? "bg-red-600/20 text-red-300 border border-red-500/40 animate-pulse"
-            : "bg-[#334155] text-slate-200 hover:bg-[#475569] border border-[#475569]"
+            : "bg-amber-500/10 text-amber-300 border border-amber-500/40 hover:bg-amber-500/20"
         }`}
-        title={listening ? "Stop dictating" : "Dictate your answer (Chrome)"}
+        title={
+          listening
+            ? "Stop the mic"
+            : "Recommended — narrate your reasoning aloud, like a real interview"
+        }
       >
         {listening ? (
           <>
@@ -197,13 +243,14 @@ export default function MicRecorder({ onTranscript, stopSignal, disabled }: MicR
         ) : (
           <>
             <Mic className="h-3.5 w-3.5" aria-hidden />
-            Speak answer
+            Think aloud
           </>
         )}
       </button>
       {listening && (
         <div className="text-[11px] text-slate-400">
-          Listening — your spoken answer is captured and sent when you submit.
+          Listening — keep narrating your reasoning. Your think-aloud is part of
+          the evaluation, just like a real interview.
         </div>
       )}
       {error && <div className="text-[11px] text-amber-400">{error}</div>}

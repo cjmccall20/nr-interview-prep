@@ -32,6 +32,13 @@ interface EvaluateBody {
   phase?: "ttfp" | "derivation" | "review"
   text_response?: string
   whiteboard_image?: string
+  /**
+   * Client-formatted think-aloud transcript: timestamped speech lines,
+   * mic on/off events, explicit [silence] gaps, and a MIC SUMMARY line.
+   */
+  verbal_transcript?: string
+  /** Whether the candidate ever turned the mic on this session. */
+  mic_used?: boolean
   conversation_history?: { role: string; content: string }[]
   problem_context?: {
     prompt_text?: string
@@ -66,6 +73,8 @@ export async function POST(request: NextRequest) {
       phase,
       text_response,
       whiteboard_image,
+      verbal_transcript,
+      mic_used,
       conversation_history,
       problem_context,
     } = body
@@ -115,6 +124,30 @@ export async function POST(request: NextRequest) {
         }`,
       },
     ]
+
+    // Think-aloud transcript (verbal communication coaching). TTFP is too short
+    // to coach; the work-phase prompts carry the coaching rubric.
+    if (phase !== "ttfp") {
+      const MAX_TRANSCRIPT_CHARS = 6000
+      const transcript =
+        typeof verbal_transcript === "string" && verbal_transcript.trim()
+          ? verbal_transcript.length > MAX_TRANSCRIPT_CHARS
+            ? `(transcript truncated)\n${verbal_transcript.slice(-MAX_TRANSCRIPT_CHARS)}`
+            : verbal_transcript
+          : null
+      if (transcript) {
+        messages.push({
+          role: "system",
+          content: `VERBAL THINK-ALOUD TRANSCRIPT (the candidate's speech while working; timestamps are mm:ss since the work phase began; [silence] lines are gaps with the mic on and no speech):\n${transcript}\nApply the Think-Aloud Coaching rules from your instructions.`,
+        })
+      } else if (mic_used === false) {
+        messages.push({
+          role: "system",
+          content:
+            "MIC STATUS: The candidate has not enabled the microphone — there is no verbal transcript. Do NOT comment on silence; you cannot see it. If (and only if) this is your first response of this phase, add one short encouragement to turn the mic on and think aloud, since the real interview is oral.",
+        })
+      }
+    }
 
     // Assumption-challenge context (Rickover "are you sure?"). Only relevant while
     // grading a derivation/capstone the candidate has otherwise gotten right.
