@@ -9,6 +9,9 @@ interface EvaluatePayload {
   phase: string
   text_response: string
   whiteboard_image?: string
+  /** Timestamped think-aloud transcript block (see lib/interview/transcript.ts). */
+  verbal_transcript?: string
+  mic_used?: boolean
   conversation_history?: { role: string; content: string }[]
   problem_context: {
     prompt_text: string

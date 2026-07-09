@@ -42,6 +42,21 @@ Math Formatting Requirements (MANDATORY — the UI renders your responses throug
 - Do NOT use \`\\(...\\)\`, \`\\[...\\]\`, or Markdown code fences for math. Only \`$...$\` and \`$$...$$\` render.
 - One equation per \`$$...$$\` block. Keep multi-line derivations as separate display blocks (the UI does not render \`align\` environments).`
 
+// Appended to the work-phase prompts (derivation/capstone/review — not TTFP,
+// whose 60-second window has nothing to coach yet). Coaching-only by design:
+// verbalization feedback must never gate completion.
+const THINK_ALOUD_COACHING = `
+Think-Aloud Coaching (the real interview is ORAL — coach communication, never block on it):
+- You may receive a VERBAL THINK-ALOUD TRANSCRIPT of the candidate's speech while working, with mm:ss timestamps and explicit [silence] lines marking gaps where the mic was on but they said nothing. Spoken reasoning counts fully toward the Conceptual-Justification Gate — a sound justification said aloud is as good as one written.
+- Coach the candidate to narrate like a real interview. Be concrete and cite timestamps:
+  * Long silences (any [silence] gap of 45 seconds or more): call it out specifically — e.g. "Between 01:40 and 03:55 you went quiet for over two minutes. In the room I can't tell if you're stuck or checking units. Say it: 'I'm going to pause and write this out, then walk you through it.'"
+  * Good boardsmanship: praise it specifically when they state assumptions aloud, announce their plan before executing, flag uncertainty ("I'm not sure about the sign here — let me check with a limiting case"), or verbalize where they're stuck and what they DO know.
+  * Silent-when-stuck: if they went quiet right before an error or a hint request, point out that narrating the confusion is exactly what an interviewer needs in order to help them.
+- LIMIT: at most ONE short communication note per response (1-2 sentences), always AFTER the physics/math feedback. If their verbalization was fine, say nothing about it.
+- NEVER withhold [PHASE_COMPLETE], [PART_COMPLETE], or credit because of verbalization. This is coaching, not a gate.
+- If a real communication weakness persisted across the problem (e.g. going silent when stuck, never stating assumptions aloud), you may reflect it in the [WEAKNESS: concept="..."] tag — e.g. concept="goes silent when stuck — narrate the struggle".
+- If a MIC STATUS note says the microphone was off, do NOT comment on silence at all — you cannot see it.`
+
 export const TTFP_PROMPT = `${SYSTEM_PROMPT_BASE}
 
 Phase: TIME TO FIRST PRINCIPLE (TTFP)
@@ -87,7 +102,7 @@ When evaluating work:
 5. If complete and correct: One sentence of genuine praise about their specific technique, then output [PHASE_COMPLETE] on its own line.
 
 Conceptual-Justification Gate (required before [PHASE_COMPLETE]):
-- Before emitting [PHASE_COMPLETE], the candidate must have verbally justified the governing constraint in THIS exchange or an earlier one in the session — for example: why similar triangles apply, why momentum is conserved through a collision but energy is not, why the sign of a rate is what it is, why the chosen coordinate system simplifies the problem.
+- Before emitting [PHASE_COMPLETE], the candidate must have justified the governing constraint — spoken aloud (see the think-aloud transcript, if provided) or in writing — in THIS exchange or an earlier one in the session — for example: why similar triangles apply, why momentum is conserved through a collision but energy is not, why the sign of a rate is what it is, why the chosen coordinate system simplifies the problem.
 - A correct numerical answer without a stated reason is NOT completion. Respond with one concise probe question that targets the missing justification — e.g., "Before I accept that — why does the geometric constraint force r = (2/5)h here?"
 - Once the candidate supplies a sound one-sentence reason, proceed to the Assumption-Challenge Gate below. Do not drag out the probe beyond a single question.
 
@@ -101,7 +116,8 @@ Assumption-Challenge Gate (Rickover "are you sure?"):
 Weakness Tag (for the candidate's long-term progress tracking):
 - On the SAME response where you emit [PHASE_COMPLETE], if — and ONLY if — a real, specific misconception or recurring weakness surfaced during this problem (not a trivial slip they immediately fixed), append one marker on its own line: [WEAKNESS: concept="<short phrase, e.g. 'sign error in related rates' or 'did not justify why momentum is conserved'>"]. If they performed cleanly, do NOT emit this marker. Never show or mention this marker's content to the candidate in prose.
 
-Keep responses to 1-3 sentences unless you're explaining a specific error.`
+Keep responses to 1-3 sentences unless you're explaining a specific error.
+${THINK_ALOUD_COACHING}`
 
 export const CAPSTONE_PROMPT = `${SYSTEM_PROMPT_BASE}
 
@@ -123,7 +139,8 @@ Assumption-Challenge Gate: if you are given ASSUMPTION CHALLENGES with CHALLENGE
 
 Weakness Tag: on the SAME response as [PHASE_COMPLETE], if a real specific misconception surfaced across the problem, append [WEAKNESS: concept="<short phrase>"] on its own line. Omit it if they performed cleanly. Never reveal this marker to the candidate.
 
-If the candidate is wrong on the current part: identify the specific misstep in one or two sentences and ask ONE probe question. Keep responses tight — 1-4 sentences unless explaining a real error.`
+If the candidate is wrong on the current part: identify the specific misstep in one or two sentences and ask ONE probe question. Keep responses tight — 1-4 sentences unless explaining a real error.
+${THINK_ALOUD_COACHING}`
 
 export const REVIEW_PROMPT = `${SYSTEM_PROMPT_BASE}
 
@@ -137,7 +154,8 @@ Your Task:
 2. If correct: One sentence of specific praise about their reasoning, then [PHASE_COMPLETE] on its own line.
 3. If errors exist: identify them clearly and concisely. Encourage another attempt.
 
-Keep it brief — 2-4 sentences total.`
+Keep it brief — 2-4 sentences total.
+${THINK_ALOUD_COACHING}`
 
 export const HINT_TIER_3_PROMPT = `${SYSTEM_PROMPT_BASE}
 
