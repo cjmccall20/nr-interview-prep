@@ -224,10 +224,10 @@ export default function MicRecorder({
         type="button"
         onClick={listening ? stop : start}
         disabled={disabled}
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+        className={`inline-flex items-center rounded font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
           listening
-            ? "bg-red-600/20 text-red-300 border border-red-500/40 animate-pulse"
-            : "bg-amber-500/10 text-amber-300 border border-amber-500/40 hover:bg-amber-500/20"
+            ? "gap-1.5 px-2.5 py-1.5 text-xs bg-red-600/20 text-red-300 border border-red-500/40 animate-pulse"
+            : "gap-2 px-4 py-2.5 text-sm bg-amber-500/15 text-amber-200 border border-amber-500/50 hover:bg-amber-500/25 shadow-sm"
         }`}
         title={
           listening
@@ -242,7 +242,7 @@ export default function MicRecorder({
           </>
         ) : (
           <>
-            <Mic className="h-3.5 w-3.5" aria-hidden />
+            <Mic className="h-5 w-5" aria-hidden />
             Think aloud
           </>
         )}
