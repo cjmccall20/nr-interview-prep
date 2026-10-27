@@ -6,6 +6,7 @@ import {
   TIER_2_FRAMEWORKS,
 } from "@/lib/interview/ai-prompts"
 import { getOpenAIKey } from "@/lib/interview/openai-key"
+import { LIGHT_MODEL, NO_REASONING } from "@/lib/interview/models"
 import {
   CREDITS_ERROR_CODE,
   CREDITS_MESSAGE,
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
     const safeTarget = (first_principle_target || "").slice(0, 500)
 
     const completion = await new OpenAI({ apiKey, fetch: globalThis.fetch.bind(globalThis) }).chat.completions.create({
-      model: "gpt-4o",
+      model: LIGHT_MODEL,
       messages: [
         { role: "system", content: HINT_TIER_3_PROMPT },
         {
@@ -83,8 +84,9 @@ export async function POST(request: NextRequest) {
           content: `<problem>${safePrompt}</problem>\n<target>${safeTarget}</target>\n\nProvide the anchor equation hint.`,
         },
       ],
-      max_tokens: 300,
+      max_completion_tokens: 300,
       temperature: 0.5,
+      ...NO_REASONING,
     })
 
     const hint =

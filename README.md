@@ -9,7 +9,7 @@ No database. No logins. No backend service to stand up. Clone the repo, drop
 in an OpenAI API key, and run it.
 
 - Next.js 15 (App Router) + React 19 + Tailwind 4
-- OpenAI `gpt-4o` for evaluation (with vision) and Tier-3 hints
+- OpenAI `gpt-6.1-terra` for evaluation (with vision); `gpt-6-luna` for Tier-3 hints
 - Client-only session persistence via `localStorage`
 - ~215 vetted problems across Calculus, Physics, and major-specific topics
 - Optional "Teach Me" equation sheet + study guide for every NUPOC topic
@@ -101,8 +101,8 @@ Desktop layout (the `ResizablePanelGroup` split) is unchanged at ≥ `md`.
 nr-interview-prep/
 ├── app/
 │   ├── api/interview/
-│   │   ├── evaluate/route.ts      # POST: SSE streaming Socratic grader (gpt-4o)
-│   │   └── hint/route.ts          # POST: Tier 1/2 canned, Tier 3 via gpt-4o
+│   │   ├── evaluate/route.ts      # POST: SSE streaming Socratic grader (gpt-6.1-terra)
+│   │   └── hint/route.ts          # POST: Tier 1/2 canned, Tier 3 via gpt-6-luna
 │   ├── interview/
 │   │   ├── page.tsx               # dashboard
 │   │   ├── session/[id]/          # single-problem workspace
@@ -217,8 +217,8 @@ All system prompts live in `lib/interview/ai-prompts.ts`:
 ### Swap the AI provider
 The only file that imports `openai` is `app/api/interview/*/route.ts`. Point
 it at any OpenAI-compatible endpoint (Azure OpenAI, Together, LiteLLM, etc.)
-by changing the `OpenAI` client's `baseURL` and `apiKey`. Update the model
-name (`gpt-4o`) to taste.
+by changing the `OpenAI` client's `baseURL` and `apiKey`. Model names live in
+`lib/interview/models.ts`.
 
 For vision-based whiteboard grading you need a **multimodal** model — the
 current plumbing assumes OpenAI's Chat Completions image content format.

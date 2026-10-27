@@ -11,6 +11,7 @@ import {
   isBlankImage,
 } from "@/lib/interview/image-compress"
 import { getOpenAIKey } from "@/lib/interview/openai-key"
+import { GRADING_MODEL, NO_REASONING } from "@/lib/interview/models"
 import {
   CREDITS_ERROR_CODE,
   CREDITS_MESSAGE,
@@ -154,7 +155,7 @@ export async function POST(request: NextRequest) {
     const challenges = Array.isArray(problem_context.assumption_challenges)
       ? problem_context.assumption_challenges
       : []
-    if (challenges.length > 0 && phase !== "review") {
+    if (challenges.length > 0 && phase === "derivation") {
       const remaining = problem_context.challenges_remaining ?? challenges.length
       const used = challenges.length - Math.max(0, Math.min(remaining, challenges.length))
       const nextChallenge = challenges[used] ?? challenges[challenges.length - 1]
@@ -236,12 +237,13 @@ Focus evaluation on the CURRENT part only. If the candidate is clearly correct o
       async start(controller) {
         try {
           const completion = await new OpenAI({ apiKey, fetch: globalThis.fetch.bind(globalThis) }).chat.completions.create({
-            model: "gpt-4o",
+            model: GRADING_MODEL,
             messages,
             stream: true,
             stream_options: { include_usage: true },
-            max_tokens: 1000,
+            max_completion_tokens: 1000,
             temperature: 0.7,
+            ...NO_REASONING,
           })
 
           let fullResponse = ""
