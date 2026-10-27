@@ -8,7 +8,7 @@ then narrate what you did.
 No database. No logins. No backend service to stand up. Clone the repo, drop
 in an OpenAI API key, and run it.
 
-- Next.js 15 (App Router) + React 19 + Tailwind 4
+- Next.js 16 (App Router) + React 19 + Tailwind 4
 - OpenAI `gpt-6.1-terra` for evaluation (with vision); `gpt-6-luna` for Tier-3 hints
 - Client-only session persistence via `localStorage`
 - ~215 vetted problems across Calculus, Physics, and major-specific topics
